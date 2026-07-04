@@ -40,5 +40,6 @@
     "displayName": "Mesa PTZ Monitor",
     "version": "1.0.0",
     "author": "João Heitor Bertoloto",
-    "email": "heitorkbb@gmail.com"
+    "email": "heitorkbb@gmail.com",
+    "website": "https://github.com/joaoheitor01/mesa-ptz-monitor"
 }
