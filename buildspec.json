@@ -36,10 +36,9 @@
             "bundleId": "com.example.plugintemplate-for-obs"
         }
     },
-    "name": "plugintemplate-for-obs",
-    "displayName": "Plugin Template for OBS",
+    "name": "mesa-ptz-monitor",
+    "displayName": "Mesa PTZ Monitor",
     "version": "1.0.0",
-    "author": "Your Name Here",
-    "website": "https://example.com",
-    "email": "me@example.com"
+    "author": "João Heitor Bertoloto",
+    "email": "heitorkbb@gmail.com"
 }
