@@ -8,48 +8,54 @@
 #include <QJsonArray>
 #include <QDateTime>
 #include <QUrl>
+#include <QVBoxLayout>
+#include <QHBoxLayout>
+#include <QFormLayout>
+#include <QLabel>
+#include <QPushButton>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QLineEdit>
+#include <QComboBox>
+#include <QCheckBox>
+#include <QFileDialog>
+#include <QFileInfo>
+#include <QSettings>
+#include <QEventLoop>
 
-static const char *URL_ESTADO = "http://127.0.0.1:8089/estado";
+static const char *URL_BASE = "http://127.0.0.1:8089";
 
-MesaPtzDock::MesaPtzDock(QWidget *parent) : QWidget(parent)
+static QStringList portasSeriais()
 {
-	setMinimumSize(240, 470);
-	connect(&nam, &QNetworkAccessManager::finished, this, &MesaPtzDock::onReply);
-	timer = new QTimer(this);
-	connect(timer, &QTimer::timeout, this, &MesaPtzDock::poll);
-	timer->start(100);
+	QStringList portas;
+#ifdef _WIN32
+	QSettings reg(QStringLiteral("HKEY_LOCAL_MACHINE\\HARDWARE\\DEVICEMAP\\SERIALCOMM"), QSettings::NativeFormat);
+	const QStringList chaves = reg.allKeys();
+	for (const QString &k : chaves)
+		portas << reg.value(k).toString();
+#endif
+	portas.removeDuplicates();
+	portas.sort();
+	return portas;
 }
 
-void MesaPtzDock::poll()
+/* ============================================================
+ * PainelMesa — a area desenhada com o estado da mesa
+ * ============================================================ */
+
+PainelMesa::PainelMesa(QWidget *parent) : QWidget(parent)
 {
-	if (pending)
-		return;
-	pending = true;
-	QNetworkRequest req{QUrl(QString::fromLatin1(URL_ESTADO))};
-	req.setTransferTimeout(500);
-	nam.get(req);
+	setMinimumSize(240, 440);
 }
 
-void MesaPtzDock::onReply(QNetworkReply *reply)
+void PainelMesa::setEstado(const QJsonObject &estado, bool online)
 {
-	pending = false;
-	if (reply->error() == QNetworkReply::NoError) {
-		const QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
-		if (doc.isObject()) {
-			e = doc.object();
-			lastOkMs = QDateTime::currentMSecsSinceEpoch();
-		}
-	}
-	reply->deleteLater();
+	e = estado;
+	on = online;
 	update();
 }
 
-bool MesaPtzDock::online() const
-{
-	return lastOkMs > 0 && QDateTime::currentMSecsSinceEpoch() - lastOkMs < 3000;
-}
-
-void MesaPtzDock::paintEvent(QPaintEvent *)
+void PainelMesa::paintEvent(QPaintEvent *)
 {
 	QPainter p(this);
 	p.setRenderHint(QPainter::Antialiasing);
@@ -64,7 +70,6 @@ void MesaPtzDock::paintEvent(QPaintEvent *)
 	const int w = width();
 	int y = m;
 
-	const bool on = online();
 	const bool ard = on && e.value("arduino").toBool();
 	const bool cam = on && e.value("camera").toBool();
 	const bool sim = on && e.value("simulacao").toBool();
@@ -186,7 +191,8 @@ void MesaPtzDock::paintEvent(QPaintEvent *)
 	/* ---------- presets 1-9 ---------- */
 	const int ativo = e.value("preset_ativo").toInt();
 	QList<int> gravados;
-	for (const auto v : e.value("presets_gravados").toArray())
+	const QJsonArray arrGravados = e.value("presets_gravados").toArray();
+	for (const auto v : arrGravados)
 		gravados.append(v.toInt());
 
 	const int gap = 6;
@@ -236,6 +242,259 @@ void MesaPtzDock::paintEvent(QPaintEvent *)
 		p.setFont(fLabel);
 		p.setPen(dim);
 		p.drawText(rect().adjusted(0, 14, 0, 14), Qt::AlignCenter,
-			   QStringLiteral("Inicie controladora_ptz_obs.py"));
+			   QStringLiteral("Use Iniciar ou configure no botao Config"));
 	}
+}
+
+/* ============================================================
+ * MesaPtzDock — cabecalho de controle + painel
+ * ============================================================ */
+
+MesaPtzDock::MesaPtzDock(QWidget *parent) : QWidget(parent)
+{
+	carregarConfig();
+
+	auto *raiz = new QVBoxLayout(this);
+	raiz->setContentsMargins(0, 0, 0, 0);
+	raiz->setSpacing(0);
+
+	auto *cab = new QHBoxLayout();
+	cab->setContentsMargins(8, 6, 8, 6);
+	lblStatus = new QLabel(QStringLiteral("script: parado"), this);
+	btnRun = new QPushButton(QStringLiteral("Iniciar"), this);
+	auto *btnCfg = new QPushButton(QStringLiteral("Config"), this);
+	btnRun->setFixedHeight(24);
+	btnCfg->setFixedHeight(24);
+	cab->addWidget(lblStatus, 1);
+	cab->addWidget(btnRun);
+	cab->addWidget(btnCfg);
+	raiz->addLayout(cab);
+
+	painel = new PainelMesa(this);
+	raiz->addWidget(painel, 1);
+
+	connect(btnRun, &QPushButton::clicked, this, &MesaPtzDock::iniciarOuParar);
+	connect(btnCfg, &QPushButton::clicked, this, &MesaPtzDock::abrirConfig);
+	connect(&nam, &QNetworkAccessManager::finished, this, &MesaPtzDock::onReply);
+
+	timer = new QTimer(this);
+	connect(timer, &QTimer::timeout, this, &MesaPtzDock::poll);
+	timer->start(100);
+
+	if (autoStart && !scriptPath.isEmpty()) {
+		QTimer::singleShot(1500, this, [this]() {
+			if (!online() && !procRodando())
+				iniciarScript();
+		});
+	}
+}
+
+MesaPtzDock::~MesaPtzDock()
+{
+	pararScript(true);
+}
+
+bool MesaPtzDock::online() const
+{
+	return lastOkMs > 0 && QDateTime::currentMSecsSinceEpoch() - lastOkMs < 3000;
+}
+
+bool MesaPtzDock::procRodando() const
+{
+	return proc && proc->state() != QProcess::NotRunning;
+}
+
+void MesaPtzDock::carregarConfig()
+{
+	QSettings s(QSettings::IniFormat, QSettings::UserScope, QStringLiteral("mesa-ptz-monitor"),
+		    QStringLiteral("config"));
+	cmdPython = s.value("cmdPython", "python").toString();
+	scriptPath = s.value("scriptPath", "").toString();
+	portaArduino = s.value("portaArduino", "COM3").toString();
+	portaCamera = s.value("portaCamera", "COM0").toString();
+	baudCamera = s.value("baudCamera", "9600").toString();
+	autoStart = s.value("autoStart", false).toBool();
+}
+
+void MesaPtzDock::salvarConfig()
+{
+	QSettings s(QSettings::IniFormat, QSettings::UserScope, QStringLiteral("mesa-ptz-monitor"),
+		    QStringLiteral("config"));
+	s.setValue("cmdPython", cmdPython);
+	s.setValue("scriptPath", scriptPath);
+	s.setValue("portaArduino", portaArduino);
+	s.setValue("portaCamera", portaCamera);
+	s.setValue("baudCamera", baudCamera);
+	s.setValue("autoStart", autoStart);
+}
+
+void MesaPtzDock::poll()
+{
+	if (pending)
+		return;
+	pending = true;
+	QNetworkRequest req{QUrl(QString::fromLatin1(URL_BASE) + "/estado")};
+	req.setTransferTimeout(500);
+	nam.get(req);
+}
+
+void MesaPtzDock::onReply(QNetworkReply *reply)
+{
+	pending = false;
+	if (reply->error() == QNetworkReply::NoError && reply->url().path() == QStringLiteral("/estado")) {
+		const QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
+		if (doc.isObject()) {
+			e = doc.object();
+			lastOkMs = QDateTime::currentMSecsSinceEpoch();
+		}
+	}
+	reply->deleteLater();
+	painel->setEstado(e, online());
+	atualizarCabecalho();
+}
+
+void MesaPtzDock::atualizarCabecalho()
+{
+	QString st;
+	if (procRodando())
+		st = online() ? QStringLiteral("script: rodando") : QStringLiteral("script: iniciando...");
+	else
+		st = online() ? QStringLiteral("script: rodando (externo)") : QStringLiteral("script: parado");
+	lblStatus->setText(st);
+	btnRun->setText(procRodando() ? QStringLiteral("Parar") : QStringLiteral("Iniciar"));
+	btnRun->setEnabled(procRodando() || !scriptPath.isEmpty());
+}
+
+void MesaPtzDock::iniciarOuParar()
+{
+	if (procRodando())
+		pararScript(false);
+	else
+		iniciarScript();
+}
+
+void MesaPtzDock::iniciarScript()
+{
+	if (procRodando() || scriptPath.isEmpty())
+		return;
+	proc = new QProcess(this);
+	proc->setWorkingDirectory(QFileInfo(scriptPath).absolutePath());
+	proc->setProcessChannelMode(QProcess::MergedChannels);
+	connect(proc, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this, &MesaPtzDock::procTerminou);
+	const QStringList args{scriptPath,  QStringLiteral("--arduino"),     portaArduino, QStringLiteral("--camera"),
+			       portaCamera, QStringLiteral("--baud-camera"), baudCamera};
+	proc->start(cmdPython, args);
+	atualizarCabecalho();
+}
+
+void MesaPtzDock::pararScript(bool bloqueante)
+{
+	if (!procRodando())
+		return;
+
+	/* pede encerramento educado: o Python para a camera e sai */
+	QNetworkRequest req{QUrl(QString::fromLatin1(URL_BASE) + "/encerrar")};
+	req.setTransferTimeout(700);
+	QNetworkReply *r = nam.get(req);
+
+	if (bloqueante) {
+		QEventLoop espera;
+		connect(r, &QNetworkReply::finished, &espera, &QEventLoop::quit);
+		QTimer::singleShot(900, &espera, &QEventLoop::quit);
+		espera.exec();
+		if (proc) {
+			proc->waitForFinished(1500);
+			if (proc->state() != QProcess::NotRunning)
+				proc->kill();
+		}
+	} else {
+		QTimer::singleShot(2000, this, [this]() {
+			if (procRodando())
+				proc->kill();
+		});
+	}
+	atualizarCabecalho();
+}
+
+void MesaPtzDock::procTerminou(int codigo, QProcess::ExitStatus)
+{
+	if (proc) {
+		proc->deleteLater();
+		proc = nullptr;
+	}
+	if (lblStatus && codigo != 0)
+		lblStatus->setText(QStringLiteral("script: parou (codigo %1)").arg(codigo));
+	atualizarCabecalho();
+}
+
+void MesaPtzDock::abrirConfig()
+{
+	QDialog dlg(this);
+	dlg.setWindowTitle(QStringLiteral("Mesa PTZ - Configuracao"));
+	auto *form = new QFormLayout(&dlg);
+
+	auto *edPython = new QLineEdit(cmdPython, &dlg);
+	form->addRow(QStringLiteral("Comando Python:"), edPython);
+
+	auto *linhaScript = new QHBoxLayout();
+	auto *edScript = new QLineEdit(scriptPath, &dlg);
+	auto *btnProcurar = new QPushButton(QStringLiteral("..."), &dlg);
+	btnProcurar->setFixedWidth(32);
+	linhaScript->addWidget(edScript, 1);
+	linhaScript->addWidget(btnProcurar);
+	form->addRow(QStringLiteral("Script (controladora):"), linhaScript);
+	connect(btnProcurar, &QPushButton::clicked, &dlg, [&dlg, edScript]() {
+		const QString f = QFileDialog::getOpenFileName(&dlg, QStringLiteral("Escolha o script Python"),
+							       edScript->text(), QStringLiteral("Python (*.py)"));
+		if (!f.isEmpty())
+			edScript->setText(f);
+	});
+
+	const QStringList portas = portasSeriais();
+
+	auto *cbArduino = new QComboBox(&dlg);
+	cbArduino->setEditable(true);
+	cbArduino->addItems(portas);
+	cbArduino->setCurrentText(portaArduino);
+	form->addRow(QStringLiteral("Porta do Arduino:"), cbArduino);
+
+	auto *cbCamera = new QComboBox(&dlg);
+	cbCamera->setEditable(true);
+	cbCamera->addItem(QStringLiteral("COM0"));
+	cbCamera->addItems(portas);
+	cbCamera->setCurrentText(portaCamera);
+	form->addRow(QStringLiteral("Porta da camera (COM0 = simulacao):"), cbCamera);
+
+	auto *cbBaud = new QComboBox(&dlg);
+	cbBaud->setEditable(true);
+	cbBaud->addItems({QStringLiteral("9600"), QStringLiteral("38400"), QStringLiteral("115200")});
+	cbBaud->setCurrentText(baudCamera);
+	form->addRow(QStringLiteral("Baud da camera:"), cbBaud);
+
+	auto *ckAuto = new QCheckBox(QStringLiteral("Iniciar o script junto com o OBS"), &dlg);
+	ckAuto->setChecked(autoStart);
+	form->addRow(QString(), ckAuto);
+
+	auto *botoes = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, &dlg);
+	form->addRow(botoes);
+	connect(botoes, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+	connect(botoes, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+
+	if (dlg.exec() != QDialog::Accepted)
+		return;
+
+	cmdPython = edPython->text().trimmed();
+	scriptPath = edScript->text().trimmed();
+	portaArduino = cbArduino->currentText().trimmed();
+	portaCamera = cbCamera->currentText().trimmed();
+	baudCamera = cbBaud->currentText().trimmed();
+	autoStart = ckAuto->isChecked();
+	salvarConfig();
+
+	/* aplica na hora: reinicia o script com as novas portas */
+	if (procRodando()) {
+		pararScript(true);
+		QTimer::singleShot(400, this, [this]() { iniciarScript(); });
+	}
+	atualizarCabecalho();
 }
