@@ -21,9 +21,24 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QSettings>
-#include <QEventLoop>
+#include <QPointer>
+#include <QTcpSocket>
+#include <QHostAddress>
 
 static const char *URL_BASE = "http://127.0.0.1:8089";
+
+/* Pede o desligamento educado ao Python SEM usar o event loop do Qt.
+ * Seguro para chamar durante o fechamento do OBS (destrutor). */
+static void pedirEncerramentoSincrono(int timeoutMs)
+{
+	QTcpSocket s;
+	s.connectToHost(QHostAddress::LocalHost, 8089);
+	if (!s.waitForConnected(timeoutMs))
+		return;
+	s.write("GET /encerrar HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n");
+	s.waitForBytesWritten(timeoutMs);
+	s.waitForReadyRead(timeoutMs);
+}
 
 static QStringList portasSeriais()
 {
@@ -392,25 +407,30 @@ void MesaPtzDock::pararScript(bool bloqueante)
 	if (!procRodando())
 		return;
 
-	/* pede encerramento educado: o Python para a camera e sai */
-	QNetworkRequest req{QUrl(QString::fromLatin1(URL_BASE) + "/encerrar")};
-	req.setTransferTimeout(700);
-	QNetworkReply *r = nam.get(req);
-
 	if (bloqueante) {
-		QEventLoop espera;
-		connect(r, &QNetworkReply::finished, &espera, &QEventLoop::quit);
-		QTimer::singleShot(900, &espera, &QEventLoop::quit);
-		espera.exec();
-		if (proc) {
-			proc->waitForFinished(1500);
-			if (proc->state() != QProcess::NotRunning)
-				proc->kill();
+		/* Caminho usado ao fechar o OBS ou aplicar novas portas.
+		 * Copia local + desconexao ANTES de esperar: procTerminou
+		 * nao pode mais mexer no ponteiro no meio da espera. */
+		QProcess *p = proc;
+		proc = nullptr;
+		if (p) {
+			disconnect(p, nullptr, this, nullptr);
+			pedirEncerramentoSincrono(700);
+			if (!p->waitForFinished(1800)) {
+				p->kill();
+				p->waitForFinished(500);
+			}
+			p->deleteLater();
 		}
 	} else {
-		QTimer::singleShot(2000, this, [this]() {
-			if (procRodando())
-				proc->kill();
+		/* Botao Parar: pede educadamente e agenda um kill de garantia */
+		QNetworkRequest req{QUrl(QString::fromLatin1(URL_BASE) + "/encerrar")};
+		req.setTransferTimeout(700);
+		nam.get(req);
+		QPointer<QProcess> guarda(proc);
+		QTimer::singleShot(2200, this, [guarda]() {
+			if (guarda && guarda->state() != QProcess::NotRunning)
+				guarda->kill();
 		});
 	}
 	atualizarCabecalho();
