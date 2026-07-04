@@ -14,8 +14,7 @@ OBS_MODULE_USE_DEFAULT_LOCALE("mesa-ptz-monitor", "en-US")
 
 bool obs_module_load(void)
 {
-	obs_frontend_add_dock_by_id("mesa_ptz_monitor", "Mesa PTZ",
-				    new MesaPtzDock());
+	obs_frontend_add_dock_by_id("mesa_ptz_monitor", "Mesa PTZ", new MesaPtzDock());
 	blog(LOG_INFO, "[mesa-ptz-monitor] plugin carregado");
 	return true;
 }

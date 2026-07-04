@@ -14,8 +14,7 @@ static const char *URL_ESTADO = "http://127.0.0.1:8089/estado";
 MesaPtzDock::MesaPtzDock(QWidget *parent) : QWidget(parent)
 {
 	setMinimumSize(240, 470);
-	connect(&nam, &QNetworkAccessManager::finished, this,
-		&MesaPtzDock::onReply);
+	connect(&nam, &QNetworkAccessManager::finished, this, &MesaPtzDock::onReply);
 	timer = new QTimer(this);
 	connect(timer, &QTimer::timeout, this, &MesaPtzDock::poll);
 	timer->start(100);
@@ -35,8 +34,7 @@ void MesaPtzDock::onReply(QNetworkReply *reply)
 {
 	pending = false;
 	if (reply->error() == QNetworkReply::NoError) {
-		const QJsonDocument doc =
-			QJsonDocument::fromJson(reply->readAll());
+		const QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
 		if (doc.isObject()) {
 			e = doc.object();
 			lastOkMs = QDateTime::currentMSecsSinceEpoch();
@@ -48,8 +46,7 @@ void MesaPtzDock::onReply(QNetworkReply *reply)
 
 bool MesaPtzDock::online() const
 {
-	return lastOkMs > 0 &&
-	       QDateTime::currentMSecsSinceEpoch() - lastOkMs < 3000;
+	return lastOkMs > 0 && QDateTime::currentMSecsSinceEpoch() - lastOkMs < 3000;
 }
 
 void MesaPtzDock::paintEvent(QPaintEvent *)
@@ -57,10 +54,9 @@ void MesaPtzDock::paintEvent(QPaintEvent *)
 	QPainter p(this);
 	p.setRenderHint(QPainter::Antialiasing);
 
-	const QColor bg(20, 22, 26), panel(27, 30, 36), line(42, 46, 55),
-		dark(16, 18, 22), txt(232, 234, 237), dim(139, 145, 157),
-		ok(61, 220, 132), err(255, 82, 82), warn(255, 176, 32),
-		zoomC(77, 208, 225), dz(58, 63, 75);
+	const QColor bg(20, 22, 26), panel(27, 30, 36), line(42, 46, 55), dark(16, 18, 22), txt(232, 234, 237),
+		dim(139, 145, 157), ok(61, 220, 132), err(255, 82, 82), warn(255, 176, 32), zoomC(77, 208, 225),
+		dz(58, 63, 75);
 
 	p.fillRect(rect(), bg);
 
@@ -94,15 +90,11 @@ void MesaPtzDock::paintEvent(QPaintEvent *)
 		QColor cor;
 		bool mostrar;
 	};
-	const Chip chips[3] = {{"ARDUINO", ard, ok, true},
-			       {"CAMERA", cam || sim, ok, true},
-			       {"SIM", sim, warn, sim}};
+	const Chip chips[3] = {{"ARDUINO", ard, ok, true}, {"CAMERA", cam || sim, ok, true}, {"SIM", sim, warn, sim}};
 	for (const Chip &c : chips) {
 		if (!c.mostrar)
 			continue;
-		const int cw =
-			p.fontMetrics().horizontalAdvance(
-				QString::fromLatin1(c.t)) + 32;
+		const int cw = p.fontMetrics().horizontalAdvance(QString::fromLatin1(c.t)) + 32;
 		const QRectF r(cx, y, cw, 22);
 		p.setPen(QPen(c.lit ? c.cor : line, 1));
 		p.setBrush(panel);
@@ -111,8 +103,7 @@ void MesaPtzDock::paintEvent(QPaintEvent *)
 		p.setBrush(c.lit ? c.cor : err);
 		p.drawEllipse(QPointF(cx + 12, y + 11), 3.5, 3.5);
 		p.setPen(txt);
-		p.drawText(r.adjusted(20, 0, -4, 0), Qt::AlignVCenter,
-			   QString::fromLatin1(c.t));
+		p.drawText(r.adjusted(20, 0, -4, 0), Qt::AlignVCenter, QString::fromLatin1(c.t));
 		cx += cw + 6;
 	}
 	y += 32;
@@ -123,10 +114,8 @@ void MesaPtzDock::paintEvent(QPaintEvent *)
 	p.setPen(QPen(line, 1));
 	p.setBrush(dark);
 	p.drawRoundedRect(sc, 8, 8);
-	p.drawLine(QPointF(sc.center().x(), sc.top() + 2),
-		   QPointF(sc.center().x(), sc.bottom() - 2));
-	p.drawLine(QPointF(sc.left() + 2, sc.center().y()),
-		   QPointF(sc.right() - 2, sc.center().y()));
+	p.drawLine(QPointF(sc.center().x(), sc.top() + 2), QPointF(sc.center().x(), sc.bottom() - 2));
+	p.drawLine(QPointF(sc.left() + 2, sc.center().y()), QPointF(sc.right() - 2, sc.center().y()));
 
 	const QJsonArray zona = e.value("zona").toArray();
 	if (zona.size() == 4) {
@@ -136,9 +125,7 @@ void MesaPtzDock::paintEvent(QPaintEvent *)
 		const double zy2 = zona[3].toDouble() / 1023.0;
 		p.setPen(QPen(dz, 1, Qt::DashLine));
 		p.setBrush(Qt::NoBrush);
-		p.drawRoundedRect(QRectF(sc.left() + zx1 * side,
-					 sc.top() + zy1 * side,
-					 (zx2 - zx1) * side,
+		p.drawRoundedRect(QRectF(sc.left() + zx1 * side, sc.top() + zy1 * side, (zx2 - zx1) * side,
 					 (zy2 - zy1) * side),
 				  4, 4);
 	}
@@ -152,16 +139,14 @@ void MesaPtzDock::paintEvent(QPaintEvent *)
 		dotc = zoomC;
 	p.setPen(Qt::NoPen);
 	p.setBrush(dotc);
-	p.drawEllipse(QPointF(sc.left() + px * side, sc.top() + py * side),
-		      6, 6);
+	p.drawEllipse(QPointF(sc.left() + px * side, sc.top() + py * side), 6, 6);
 	y += side + 8;
 
 	/* ---------- leituras ---------- */
 	p.setFont(fMono);
 	p.setPen(txt);
-	const QString l1 = QStringLiteral("X %1   Y %2")
-				   .arg(e.value("x").toInt(512), 4)
-				   .arg(e.value("y").toInt(512), 4);
+	const QString l1 =
+		QStringLiteral("X %1   Y %2").arg(e.value("x").toInt(512), 4).arg(e.value("y").toInt(512), 4);
 	const QString l2 = QStringLiteral("PAN %1   TILT %2")
 				   .arg(e.value("pan_vel").toInt(), 2)
 				   .arg(e.value("tilt_vel").toInt(), 2);
@@ -181,9 +166,7 @@ void MesaPtzDock::paintEvent(QPaintEvent *)
 		bcor = warn;
 	} else if (!zoom.isEmpty()) {
 		badge = QStringLiteral("ZOOM %1 v%2")
-				.arg(zoom == QStringLiteral("in")
-					     ? QStringLiteral("IN")
-					     : QStringLiteral("OUT"))
+				.arg(zoom == QStringLiteral("in") ? QStringLiteral("IN") : QStringLiteral("OUT"))
 				.arg(e.value("zoom_vel").toInt());
 		bcor = zoomC;
 	} else if (movendo) {
@@ -213,21 +196,17 @@ void MesaPtzDock::paintEvent(QPaintEvent *)
 	for (int n = 1; n <= 9; n++) {
 		const int col = (n - 1) % 3;
 		const int row = (n - 1) / 3;
-		const QRectF cel(m + col * (cw3 + gap), y + row * (ch + gap),
-				 cw3, ch);
+		const QRectF cel(m + col * (cw3 + gap), y + row * (ch + gap), cw3, ch);
 		const bool isAtivo = (ativo == n);
 		p.setPen(QPen(isAtivo ? ok : line, 1));
 		p.setBrush(dark);
 		p.drawRoundedRect(cel, 6, 6);
-		p.setPen(isAtivo ? ok
-				 : (gravados.contains(n) ? txt : dim));
+		p.setPen(isAtivo ? ok : (gravados.contains(n) ? txt : dim));
 		p.drawText(cel, Qt::AlignCenter, QString::number(n));
 		if (gravados.contains(n)) {
 			p.setPen(Qt::NoPen);
 			p.setBrush(warn);
-			p.drawEllipse(
-				QPointF(cel.right() - 8, cel.top() + 8),
-				2.5, 2.5);
+			p.drawEllipse(QPointF(cel.right() - 8, cel.top() + 8), 2.5, 2.5);
 		}
 	}
 	y += 3 * ch + 2 * gap + 12;
@@ -235,14 +214,12 @@ void MesaPtzDock::paintEvent(QPaintEvent *)
 	/* ---------- ultimo evento ---------- */
 	p.setFont(fLabel);
 	p.setPen(dim);
-	p.drawText(QRectF(m, y, w - 2 * m, 14), Qt::AlignVCenter,
-		   QStringLiteral("ULTIMO EVENTO"));
+	p.drawText(QRectF(m, y, w - 2 * m, 14), Qt::AlignVCenter, QStringLiteral("ULTIMO EVENTO"));
 	y += 16;
 	p.setFont(fMono);
 	p.setPen(txt);
-	const QString ev = p.fontMetrics().elidedText(
-		e.value("evento").toString(QStringLiteral("...")),
-		Qt::ElideRight, w - 2 * m);
+	const QString ev = p.fontMetrics().elidedText(e.value("evento").toString(QStringLiteral("...")), Qt::ElideRight,
+						      w - 2 * m);
 	p.drawText(QRectF(m, y, w - 2 * m, 18), Qt::AlignVCenter, ev);
 
 	/* ---------- overlay: script offline ---------- */
@@ -255,9 +232,7 @@ void MesaPtzDock::paintEvent(QPaintEvent *)
 		fBig.setBold(true);
 		p.setFont(fBig);
 		p.setPen(err);
-		p.drawText(rect().adjusted(0, -14, 0, -14),
-			   Qt::AlignCenter,
-			   QStringLiteral("SCRIPT PYTHON OFFLINE"));
+		p.drawText(rect().adjusted(0, -14, 0, -14), Qt::AlignCenter, QStringLiteral("SCRIPT PYTHON OFFLINE"));
 		p.setFont(fLabel);
 		p.setPen(dim);
 		p.drawText(rect().adjusted(0, 14, 0, 14), Qt::AlignCenter,

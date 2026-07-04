@@ -29,7 +29,7 @@ private:
 
 	QNetworkAccessManager nam;
 	QTimer *timer = nullptr;
-	QJsonObject e;          // ultimo estado JSON recebido
-	qint64 lastOkMs = 0;    // quando recebemos dados validos
-	bool pending = false;   // evita empilhar requisicoes
+	QJsonObject e;        // ultimo estado JSON recebido
+	qint64 lastOkMs = 0;  // quando recebemos dados validos
+	bool pending = false; // evita empilhar requisicoes
 };
